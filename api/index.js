@@ -144,10 +144,35 @@ app.post('/cashfree-webhook', async (req, res) => {
         const payload = req.body;
         console.log("📥 Received Webhook Payload:", JSON.stringify(payload));
 
-        // Direct check for order status notification safely bypass signatures
-        if (payload && payload.data && payload.data.order && payload.data.order.order_status === "PAID") {
-            const orderId = payload.data.order.order_id; 
-            console.log(`🎯 Order Verified Paid: ${orderId}. Initializing Sync Pipeline.`);
+        if (!payload) return res.status(200).send("Empty payload");
+
+        // 🔥 DYNAMIC STRUCUTRE DETECTOR FOR CASHFREE PARSING
+        let orderId = null;
+        let isPaid = false;
+
+        // Structure 1: payload.data.order
+        if (payload.data && payload.data.order) {
+            orderId = payload.data.order.order_id;
+            isPaid = payload.data.order.order_status === "PAID";
+        } 
+        // Structure 2: payload.order
+        else if (payload.order) {
+            orderId = payload.order.order_id;
+            isPaid = payload.order.order_status === "PAID" || payload.order.status === "PAID";
+        }
+        // Structure 3: Direct fields (older/alternative webhook hooks)
+        else if (payload.orderId || payload.order_id) {
+            orderId = payload.orderId || payload.order_id;
+            isPaid = payload.orderStatus === "PAID" || payload.order_status === "PAID" || payload.txStatus === "SUCCESS";
+        }
+
+        // Catch event types directly if defined
+        if (payload.event === "ORDER_PAID" || payload.event === "PAYMENT_SUCCESS") {
+            isPaid = true;
+        }
+
+        if (orderId && isPaid) {
+            console.log(`🎯 Validated Paid Order: ${orderId}. Processing DB sync.`);
 
             const tRes = await fetch(`${dbBaseUrl}/tournaments.json`);
             const tournamentsData = await tRes.json() || {};
@@ -196,7 +221,10 @@ app.post('/cashfree-webhook', async (req, res) => {
                     }
                 }
             }
+        } else {
+            console.log(`⚠️ Webhook received but condition unfulfilled. OrderId: ${orderId}, PaidStatus: ${isPaid}`);
         }
+
         return res.status(200).send("OK");
     } catch (error) {
         console.error("Webhook processing error:", error.message);
