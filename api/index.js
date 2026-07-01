@@ -14,6 +14,88 @@ app.use(express.json());
 
 const clientID = "129193925e1e0eea3a648a647049391921"; 
 const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498"; 
+const dbBaseUrl = "https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+// Helper function to handle admin validation & commission calculation via REST API
+async function processCommissionDistributionEngine(reg, registrationId) {
+    if (!reg || reg.commissionProcessed) return;
+
+    try {
+        // 1. Fetch player information
+        const playerRes = await fetch(`${dbBaseUrl}/players/${reg.whatsapp}.json`);
+        const player = await playerRes.json();
+        if (!player) return;
+
+        const referralCode = player.referrerCode || reg.referralCode || "";
+        if (!referralCode) return;
+
+        // 2. Fetch all affiliate users
+        const affRes = await fetch(`${dbBaseUrl}/affiliateUsers.json`);
+        const affiliateUsers = await affRes.json();
+        if (!affiliateUsers) return;
+
+        let affiliateKey = null; 
+        let affiliateData = null;
+        for (const key in affiliateUsers) {
+            if (affiliateUsers[key].code?.toUpperCase() === referralCode.toUpperCase()) {
+                affiliateKey = key; 
+                affiliateData = affiliateUsers[key]; 
+                break;
+            }
+        }
+        if (!affiliateKey) return;
+
+        const isFirstCommission = !player.firstTournamentCommissionPaid;
+        let commissionRate = isFirstCommission ? 0.20 : 0.10;
+
+        if (isFirstCommission) { 
+            await fetch(`${dbBaseUrl}/players/${reg.whatsapp}/firstTournamentCommissionPaid.json`, {
+                method: "PUT",
+                body: JSON.stringify(true)
+            }); 
+        }
+        
+        const commission = Math.round(Number(reg.amount || 0) * commissionRate);
+
+        // 3. Push wallet transaction token
+        const txData = {
+            affiliateCode: affiliateData.code, affiliateMobile: affiliateKey, mobile: affiliateKey,
+            playerName: reg.name, playerMobile: reg.whatsapp, tournament: reg.tournament, registrationId,
+            amount: Number(reg.amount || 0), commission, commissionPercent: commissionRate * 100,
+            type: "Credit", source: isFirstCommission ? "First Tournament" : "Tournament Rejoin",
+            status: "Pending", date: new Date().toLocaleString("en-GB"), createdAt: Date.now()
+        };
+        await fetch(`${dbBaseUrl}/walletTransactions.json`, {
+            method: "POST",
+            body: JSON.stringify(txData)
+        });
+
+        // 4. Update affiliate user wallet metrics
+        const updatedAffiliateMetrics = {
+            pendingAmount: Number(affiliateData.pendingAmount || 0) + commission,
+            totalEarned: Number(affiliateData.totalEarned || 0) + commission,
+            totalReferrals: Number(affiliateData.totalReferrals || 0) + 1
+        };
+        await fetch(`${dbBaseUrl}/affiliateUsers/${affiliateKey}.json`, {
+            method: "PATCH",
+            body: JSON.stringify(updatedAffiliateMetrics)
+        });
+
+        // 5. Finalize database sync overrides
+        await fetch(`${dbBaseUrl}/players/${reg.whatsapp}/firstTournamentCommissionPaid.json`, {
+            method: "PUT",
+            body: JSON.stringify(true)
+        });
+        await fetch(`${dbBaseUrl}/registrations/${registrationId}/commissionProcessed.json`, {
+            method: "PUT",
+            body: JSON.stringify(true)
+        });
+
+        console.log(`⚡ Commission processed successfully for registration: ${registrationId}`);
+    } catch (e) {
+        console.error("Error processing commission distribution engine:", e.message);
+    }
+}
 
 // Create Order Route
 app.post('/create-order', async (req, res) => {
@@ -62,7 +144,7 @@ app.post('/create-order', async (req, res) => {
     }
 });
 
-// Webhook Route using ultra-fast Firebase REST API (No Keys Required)
+// Webhook Route
 app.post('/cashfree-webhook', async (req, res) => {
     try {
         const signature = req.headers['x-webhook-signature'];
@@ -79,32 +161,52 @@ app.post('/cashfree-webhook', async (req, res) => {
         if (payload.event === "ORDER_PAID" || (payload.data && payload.data.order && payload.data.order.order_status === "PAID")) {
             const orderId = payload.data.order.order_id; 
 
-            // 🚀 Fetching data via open REST endpoint
-            const dbBaseUrl = "https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app";
-            
-            // 1. Update Tournaments Registrations
+            // Fetch tournaments config node to append correct room links dynamically
+            const tRes = await fetch(`${dbBaseUrl}/tournaments.json`);
+            const tournamentsData = await tRes.json() || {};
+
+            // 1. Process Tournament Registrations & Automatic Payouts
             const tourRes = await fetch(`${dbBaseUrl}/registrations.json`);
             const tourData = await tourRes.json();
             if (tourData) {
                 for (let key in tourData) {
                     if (tourData[key].paymentId === orderId) {
-                        await fetch(`${dbBaseUrl}/registrations/${key}/status.json`, {
-                            method: "PUT",
-                            body: JSON.stringify("Approved")
+                        let tournamentLink = "";
+                        for (const tKey in tournamentsData) {
+                            if (tournamentsData[tKey].title === tourData[key].tournament) {
+                                tournamentLink = tournamentsData[tKey].tournamentLink || "";
+                                break;
+                            }
+                        }
+
+                        // Update status, clear rejection and append room link
+                        await fetch(`${dbBaseUrl}/registrations/${key}.json`, {
+                            method: "PATCH",
+                            body: JSON.stringify({
+                                status: "Approved",
+                                rejectReason: "",
+                                tournamentLink: tournamentLink
+                            })
                         });
+
+                        // Trigger the affiliate automated engine mapping logs
+                        await processCommissionDistributionEngine(tourData[key], key);
                     }
                 }
             }
 
-            // 2. Update Puzzle Pass Registrations
+            // 2. Process Puzzle Pass Registrations
             const passRes = await fetch(`${dbBaseUrl}/puzzle_pass_registrations.json`);
             const passData = await passRes.json();
             if (passData) {
                 for (let key in passData) {
                     if (passData[key].paymentId === orderId) {
-                        await fetch(`${dbBaseUrl}/puzzle_pass_registrations/${key}/status.json`, {
-                            method: "PUT",
-                            body: JSON.stringify("Approved")
+                        await fetch(`${dbBaseUrl}/puzzle_pass_registrations/${key}.json`, {
+                            method: "PATCH",
+                            body: JSON.stringify({
+                                status: "Approved",
+                                rejectReason: ""
+                            })
                         });
                     }
                 }
@@ -118,7 +220,7 @@ app.post('/cashfree-webhook', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Continuous REST Server process online at port ${PORT}`);
+    console.log(`🚀 Continuous REST Automated Server process online at port ${PORT}`);
 });
 
 module.exports = app;
