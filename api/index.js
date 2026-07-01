@@ -10,7 +10,7 @@ const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498";
 const dbSecret = "SMn3KGEniy6MJonxSlonhyJ6qjj8m8s8EbuZHnD2"; 
 const dbBaseUrl = `https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app`;
 
-// Automated Affiliate Wallet Engine
+// 🚀 AUTOMATED AFFILIATE WALLET ENGINE FOR ORIGINAL SCHEMAS
 async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, orderId, tournamentTitle) {
     try {
         const pRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
@@ -35,7 +35,9 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
         let rate = isFirst ? 0.20 : 0.10;
         const commission = Math.round(Number(amount) * rate);
 
-        // Save inside original walletTransactions node layout
+        const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
+
+        // 1. Push transaction log inside walletTransactions
         await fetch(`${dbBaseUrl}/walletTransactions.json?auth=${dbSecret}`, {
             method: "POST",
             body: JSON.stringify({
@@ -43,11 +45,11 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
                 playerName: name, playerMobile: whatsapp, tournament: tournamentTitle, registrationId: orderId,
                 amount: Number(amount), commission, commissionPercent: rate * 100,
                 type: "Credit", source: isFirst ? "First Tournament" : "Tournament Rejoin",
-                status: "Approved", date: new Date().toLocaleString("en-GB"), createdAt: Date.now()
+                status: "Approved", date: currentIndiaDate, createdAt: Date.now()
             })
         });
 
-        // Patch metrics inside original affiliateUsers node layout
+        // 2. Patch real balance inside affiliateUsers
         await fetch(`${dbBaseUrl}/affiliateUsers/${affKey}.json?auth=${dbSecret}`, {
             method: "PATCH",
             body: JSON.stringify({
@@ -57,11 +59,12 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
             })
         });
 
+        // 3. Update player status flag
         await fetch(`${dbBaseUrl}/players/${whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, { method: "PUT", body: JSON.stringify(true) });
-    } catch (e) { console.error("Affiliate Engine Error: ", e.message); }
+    } catch (e) { console.error("Affiliate engine failure: ", e.message); }
 }
 
-// 🚀 REAL-TIME AUTO APPROVAL CHECKER AND DATA SAVER (alpha-numeric PUSH format)
+// 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY
 app.get('/check-status', async (req, res) => {
     try {
         const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink, amount } = req.query;
@@ -76,26 +79,29 @@ app.get('/check-status', async (req, res) => {
         if (orderDetails.order_status === "PAID") {
             const targetNode = nodeType === "PuzzlePass" ? "puzzle_pass_registrations" : "registrations";
             
-            // Check duplicates based on paymentId string value matching order_id
+            // Duplicate write checking loop
             const dupCheckRes = await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`);
             const dupCheckData = await dupCheckRes.json() || {};
             let isAlreadySaved = Object.values(dupCheckData).some(v => v.paymentId === order_id);
 
             if (!isAlreadySaved) {
+                // Exact India Timestamp Creation
+                const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
+
                 const registrationData = {
-                    date: new Date().toLocaleString("en-GB"), name, whatsapp, lichess, rating, state,
+                    date: currentIndiaDate, name, whatsapp, lichess, rating, state,
                     tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
                     paymentId: order_id, status: "Approved", referralCode: referralCode || "",
                     commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false
                 };
 
-                // Use POST (Push method) to match the alpha-numeric keys layout of your database export
+                // Use POST (Push method) to match your original database alpha-numeric keys layout
                 await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
                     method: "POST",
                     body: JSON.stringify(registrationData)
                 });
 
-                // Update players node structure
+                // Update players profiles node structure
                 const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
                 const playerExists = await playerRes.json();
                 
@@ -103,7 +109,7 @@ app.get('/check-status', async (req, res) => {
                     await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
                         method: "PUT",
                         body: JSON.stringify({
-                            name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB"),
+                            name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }),
                             banned: false, referrerCode: referralCode || "", affiliateAssigned: !!referralCode, firstTournamentCommissionPaid: false
                         })
                     });
@@ -140,5 +146,5 @@ app.post('/create-order', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Final Polling Core API Matrix Online`));
+app.listen(PORT, () => console.log(`🚀 Autopilot Engine Server Active`));
 module.exports = app;
