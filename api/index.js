@@ -13,21 +13,24 @@ app.use(express.json());
 
 const clientID = "129193925e1e0eea3a648a647049391921"; 
 const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498"; 
-const dbBaseUrl = "https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+// 🔑 DATABASE SECRET KEY APPLIED FROM image_282b35.png
+const dbSecret = "SMn3KGEniy6MJonxSlonhyJ6qjj8m8s8EbuZHnD2"; 
+const dbBaseUrl = `https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app`;
 
 // Automated Commission Processing Logic Engine
 async function processCommissionDistributionEngine(reg, registrationId) {
     if (!reg || reg.commissionProcessed) return;
 
     try {
-        const playerRes = await fetch(`${dbBaseUrl}/players/${reg.whatsapp}.json`);
+        const playerRes = await fetch(`${dbBaseUrl}/players/${reg.whatsapp}.json?auth=${dbSecret}`);
         const player = await playerRes.json();
         if (!player) return;
 
         const referralCode = player.referrerCode || reg.referralCode || "";
         if (!referralCode) return;
 
-        const affRes = await fetch(`${dbBaseUrl}/affiliateUsers.json`);
+        const affRes = await fetch(`${dbBaseUrl}/affiliateUsers.json?auth=${dbSecret}`);
         const affiliateUsers = await affRes.json();
         if (!affiliateUsers) return;
 
@@ -46,7 +49,7 @@ async function processCommissionDistributionEngine(reg, registrationId) {
         let commissionRate = isFirstCommission ? 0.20 : 0.10;
 
         if (isFirstCommission) { 
-            await fetch(`${dbBaseUrl}/players/${reg.whatsapp}/firstTournamentCommissionPaid.json`, {
+            await fetch(`${dbBaseUrl}/players/${reg.whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, {
                 method: "PUT",
                 body: JSON.stringify(true)
             }); 
@@ -61,7 +64,7 @@ async function processCommissionDistributionEngine(reg, registrationId) {
             type: "Credit", source: isFirstCommission ? "First Tournament" : "Tournament Rejoin",
             status: "Pending", date: new Date().toLocaleString("en-GB"), createdAt: Date.now()
         };
-        await fetch(`${dbBaseUrl}/walletTransactions.json`, {
+        await fetch(`${dbBaseUrl}/walletTransactions.json?auth=${dbSecret}`, {
             method: "POST",
             body: JSON.stringify(txData)
         });
@@ -71,21 +74,20 @@ async function processCommissionDistributionEngine(reg, registrationId) {
             totalEarned: Number(affiliateData.totalEarned || 0) + commission,
             totalReferrals: Number(affiliateData.totalReferrals || 0) + 1
         };
-        await fetch(`${dbBaseUrl}/affiliateUsers/${affiliateKey}.json`, {
+        await fetch(`${dbBaseUrl}/affiliateUsers/${affiliateKey}.json?auth=${dbSecret}`, {
             method: "PATCH",
             body: JSON.stringify(updatedAffiliateMetrics)
         });
 
-        await fetch(`${dbBaseUrl}/players/${reg.whatsapp}/firstTournamentCommissionPaid.json`, {
+        await fetch(`${dbBaseUrl}/players/${reg.whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, {
             method: "PUT",
             body: JSON.stringify(true)
         });
-        await fetch(`${dbBaseUrl}/registrations/${registrationId}/commissionProcessed.json`, {
+        await fetch(`${dbBaseUrl}/registrations/${registrationId}/commissionProcessed.json?auth=${dbSecret}`, {
             method: "PUT",
             body: JSON.stringify(true)
         });
 
-        console.log(`⚡ Commission processed successfully for registration: ${registrationId}`);
     } catch (e) {
         console.error("Error processing commission distribution engine:", e.message);
     }
@@ -142,43 +144,32 @@ app.post('/create-order', async (req, res) => {
 app.post('/cashfree-webhook', async (req, res) => {
     try {
         const payload = req.body;
-        console.log("📥 Received Webhook Payload:", JSON.stringify(payload));
-
         if (!payload) return res.status(200).send("Empty payload");
 
-        // 🔥 DYNAMIC STRUCUTRE DETECTOR FOR CASHFREE PARSING
         let orderId = null;
         let isPaid = false;
 
-        // Structure 1: payload.data.order
         if (payload.data && payload.data.order) {
             orderId = payload.data.order.order_id;
             isPaid = payload.data.order.order_status === "PAID";
-        } 
-        // Structure 2: payload.order
-        else if (payload.order) {
+        } else if (payload.order) {
             orderId = payload.order.order_id;
             isPaid = payload.order.order_status === "PAID" || payload.order.status === "PAID";
-        }
-        // Structure 3: Direct fields (older/alternative webhook hooks)
-        else if (payload.orderId || payload.order_id) {
+        } else if (payload.orderId || payload.order_id) {
             orderId = payload.orderId || payload.order_id;
             isPaid = payload.orderStatus === "PAID" || payload.order_status === "PAID" || payload.txStatus === "SUCCESS";
         }
 
-        // Catch event types directly if defined
         if (payload.event === "ORDER_PAID" || payload.event === "PAYMENT_SUCCESS") {
             isPaid = true;
         }
 
         if (orderId && isPaid) {
-            console.log(`🎯 Validated Paid Order: ${orderId}. Processing DB sync.`);
-
-            const tRes = await fetch(`${dbBaseUrl}/tournaments.json`);
+            const tRes = await fetch(`${dbBaseUrl}/tournaments.json?auth=${dbSecret}`);
             const tournamentsData = await tRes.json() || {};
 
             // 1. Update Tournaments Node
-            const tourRes = await fetch(`${dbBaseUrl}/registrations.json`);
+            const tourRes = await fetch(`${dbBaseUrl}/registrations.json?auth=${dbSecret}`);
             const tourData = await tourRes.json();
             if (tourData) {
                 for (let key in tourData) {
@@ -191,7 +182,7 @@ app.post('/cashfree-webhook', async (req, res) => {
                             }
                         }
 
-                        await fetch(`${dbBaseUrl}/registrations/${key}.json`, {
+                        await fetch(`${dbBaseUrl}/registrations/${key}.json?auth=${dbSecret}`, {
                             method: "PATCH",
                             body: JSON.stringify({
                                 status: "Approved",
@@ -206,12 +197,12 @@ app.post('/cashfree-webhook', async (req, res) => {
             }
 
             // 2. Update Puzzle Passes Node
-            const passRes = await fetch(`${dbBaseUrl}/puzzle_pass_registrations.json`);
+            const passRes = await fetch(`${dbBaseUrl}/puzzle_pass_registrations.json?auth=${dbSecret}`);
             const passData = await passRes.json();
             if (passData) {
                 for (let key in passData) {
                     if (passData[key].paymentId === orderId) {
-                        await fetch(`${dbBaseUrl}/puzzle_pass_registrations/${key}.json`, {
+                        await fetch(`${dbBaseUrl}/puzzle_pass_registrations/${key}.json?auth=${dbSecret}`, {
                             method: "PATCH",
                             body: JSON.stringify({
                                 status: "Approved",
@@ -221,13 +212,9 @@ app.post('/cashfree-webhook', async (req, res) => {
                     }
                 }
             }
-        } else {
-            console.log(`⚠️ Webhook received but condition unfulfilled. OrderId: ${orderId}, PaidStatus: ${isPaid}`);
         }
-
         return res.status(200).send("OK");
     } catch (error) {
-        console.error("Webhook processing error:", error.message);
         return res.status(500).send("Internal Error");
     }
 });
