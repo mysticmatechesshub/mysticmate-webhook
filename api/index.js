@@ -10,7 +10,7 @@ const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498";
 const dbSecret = "SMn3KGEniy6MJonxSlonhyJ6qjj8m8s8EbuZHnD2"; 
 const dbBaseUrl = `https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app`;
 
-// Automated Affiliate Engine Managed Securely on Backend Server
+// Automated Affiliate Wallet Engine
 async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, orderId, tournamentTitle) {
     try {
         const pRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
@@ -35,9 +35,9 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
         let rate = isFirst ? 0.20 : 0.10;
         const commission = Math.round(Number(amount) * rate);
 
-        // Wallet Transaction Node Update
-        await fetch(`${dbBaseUrl}/walletTransactions/tx_${orderId}.json?auth=${dbSecret}`, {
-            method: "PUT",
+        // Save inside original walletTransactions node layout
+        await fetch(`${dbBaseUrl}/walletTransactions.json?auth=${dbSecret}`, {
+            method: "POST",
             body: JSON.stringify({
                 affiliateCode: affData.code, affiliateMobile: affKey, mobile: affKey,
                 playerName: name, playerMobile: whatsapp, tournament: tournamentTitle, registrationId: orderId,
@@ -47,7 +47,7 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
             })
         });
 
-        // Patch affiliate balances
+        // Patch metrics inside original affiliateUsers node layout
         await fetch(`${dbBaseUrl}/affiliateUsers/${affKey}.json?auth=${dbSecret}`, {
             method: "PATCH",
             body: JSON.stringify({
@@ -58,93 +58,64 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
         });
 
         await fetch(`${dbBaseUrl}/players/${whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, { method: "PUT", body: JSON.stringify(true) });
-    } catch (e) { console.error("Affiliate Logic Error: ", e.message); }
+    } catch (e) { console.error("Affiliate Engine Error: ", e.message); }
 }
 
-// 🚀 TARGET STEP A: PRE-SAVE PENDING ENTRY DIRECTLY VIA BACKEND
-app.post('/pre-save-registration', async (req, res) => {
+// 🚀 REAL-TIME AUTO APPROVAL CHECKER AND DATA SAVER (alpha-numeric PUSH format)
+app.get('/check-status', async (req, res) => {
     try {
-        const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink } = req.body;
-        const targetNode = nodeType === "PuzzlePass" ? "puzzle_pass_registrations" : "registrations";
+        const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink, amount } = req.query;
+        if (!order_id) return res.status(400).json({ error: "Missing parameters" });
 
-        const registrationData = {
-            date: new Date().toLocaleString("en-GB"), name, whatsapp, lichess, rating, state,
-            tournament: tournamentTitle, passName: tournamentTitle, amount: 0, 
-            paymentId: order_id, status: "Pending", referralCode: referralCode || "",
-            commissionProcessed: false, tournamentLink: tournamentLink || ""
-        };
-
-        await fetch(`${dbBaseUrl}/${targetNode}/reg_${order_id}.json?auth=${dbSecret}`, {
-            method: "PUT",
-            body: JSON.stringify(registrationData)
+        const response = await fetch(`https://api.cashfree.com/pg/orders/${order_id}`, {
+            method: "GET",
+            headers: { "x-client-id": clientID, "x-client-secret": secretKey, "x-api-version": "2023-08-01", "Content-Type": "application/json" }
         });
+        const orderDetails = await response.json();
 
-        return res.status(200).json({ success: true });
-    } catch (error) { return res.status(500).json({ error: error.message }); }
-});
+        if (orderDetails.order_status === "PAID") {
+            const targetNode = nodeType === "PuzzlePass" ? "puzzle_pass_registrations" : "registrations";
+            
+            // Check duplicates based on paymentId string value matching order_id
+            const dupCheckRes = await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`);
+            const dupCheckData = await dupCheckRes.json() || {};
+            let isAlreadySaved = Object.values(dupCheckData).some(v => v.paymentId === order_id);
 
-// 🚀 TARGET STEP B: CASHFREE OFFICIAL WEBHOOK TUNNEL FOR SECURE AUTO-APPROVAL
-app.post('/cashfree-webhook', async (req, res) => {
-    try {
-        const payload = req.body;
-        console.log("📥 Webhook Triggered:", JSON.stringify(payload));
-        if (!payload) return res.status(200).send("Empty");
+            if (!isAlreadySaved) {
+                const registrationData = {
+                    date: new Date().toLocaleString("en-GB"), name, whatsapp, lichess, rating, state,
+                    tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
+                    paymentId: order_id, status: "Approved", referralCode: referralCode || "",
+                    commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false
+                };
 
-        let orderId = null;
-        let isPaid = false;
-
-        if (payload.data && payload.data.order) {
-            orderId = payload.data.order.order_id;
-            isPaid = payload.data.order.order_status === "PAID";
-        } else if (payload.order) {
-            orderId = payload.order.order_id;
-            isPaid = payload.order.order_status === "PAID" || payload.order.status === "PAID";
-        }
-
-        if (orderId && isPaid) {
-            // Check in both nodes where reg_{orderId} exists
-            let finalTargetNode = "registrations";
-            let checkReg = await fetch(`${dbBaseUrl}/registrations/reg_${orderId}.json?auth=${dbSecret}`);
-            let regData = await checkReg.json();
-
-            if (!regData) {
-                finalTargetNode = "puzzle_pass_registrations";
-                checkReg = await fetch(`${dbBaseUrl}/puzzle_pass_registrations/reg_${orderId}.json?auth=${dbSecret}`);
-                regData = await checkReg.json();
-            }
-
-            if (regData && regData.status !== "Approved") {
-                // Update Amount and Force Status to Approved
-                await fetch(`${dbBaseUrl}/${finalTargetNode}/reg_${orderId}.json?auth=${dbSecret}`, {
-                    method: "PATCH",
-                    body: JSON.stringify({ status: "Approved", amount: payload.data?.order?.order_amount || regData.amount })
+                // Use POST (Push method) to match the alpha-numeric keys layout of your database export
+                await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
+                    method: "POST",
+                    body: JSON.stringify(registrationData)
                 });
 
-                // Profile initialization if new player profile is mapped
-                const playerCheck = await fetch(`${dbBaseUrl}/players/${regData.whatsapp}.json?auth=${dbSecret}`);
-                const playerExists = await playerCheck.json();
+                // Update players node structure
+                const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
+                const playerExists = await playerRes.json();
                 
                 if (!playerExists) {
-                    await fetch(`${dbBaseUrl}/players/${regData.whatsapp}.json?auth=${dbSecret}`, {
+                    await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
                         method: "PUT",
                         body: JSON.stringify({
-                            name: regData.name, whatsapp: regData.whatsapp, lichess: regData.lichess, rating: regData.rating, state: regData.state,
-                            firstJoined: new Date().toLocaleDateString("en-GB"), banned: false, referrerCode: regData.referralCode || "",
-                            affiliateAssigned: !!regData.referralCode, firstTournamentCommissionPaid: false
+                            name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB"),
+                            banned: false, referrerCode: referralCode || "", affiliateAssigned: !!referralCode, firstTournamentCommissionPaid: false
                         })
                     });
                 }
 
-                if (finalTargetNode !== "puzzle_pass_registrations") {
-                    await runOriginalAffiliateEngine(regData.name, regData.whatsapp, regData.referralCode, regData.amount, orderId, regData.tournament);
+                if (nodeType !== "PuzzlePass") {
+                    await runOriginalAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, order_id, tournamentTitle);
                 }
             }
         }
-        return res.status(200).send("OK");
-    } catch (error) {
-        console.error("Webhook processing error: ", error.message);
-        return res.status(500).send("Error");
-    }
+        return res.status(200).json({ status: orderDetails.order_status || "PENDING" });
+    } catch (error) { return res.status(500).json({ error: error.message }); }
 });
 
 // Create Order Route
@@ -169,5 +140,5 @@ app.post('/create-order', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Autopilot Webhook Engine Online`));
+app.listen(PORT, () => console.log(`🚀 Final Polling Core API Matrix Online`));
 module.exports = app;
