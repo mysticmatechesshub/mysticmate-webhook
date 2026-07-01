@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
-const admin = require('firebase-admin');
 
 const app = express();
 
@@ -15,30 +14,6 @@ app.use(express.json());
 
 const clientID = "129193925e1e0eea3a648a647049391921"; 
 const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498"; 
-
-// 🔥 100% FAIL-PROOF INLINE KEY FORMATTING
-const rawKey = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC0kIQoK/pgSbLw\nt3XAAm91k5P9aSvV7Hflz6PyA8DEsQD8e3l5fcgpqjpRdERHTtDxa3Awm/EqvuME\nCQVmBnbDLsRLvJR8e86QBc7T151ytF1eUP6ed+jp32aUbHqeNbBqR2nwRvVgtzmd\nLBaelVX1OKW0F7LzbBmrcwwjZTuhM34so+RkIF458q/EcCJx9MoAg2SVrL+4YUN/\nj9DnQeQu59ashp4zGlzo4lVho+4UHdaj87VYJbC/IrK5PdDvpamzdzUj/UbNfGbX\neXCj2uAZeImb8KNiM9qc4riPYpcEOC7cY+iV0P4zenuW9DELwnwRQr2LMClNXl+j\njhPINsxHAgMBAAECggEABf3VpM+bcJ6BcDi7kNzZKKRLq4OrOgoCtdQnXdx/WlzV\nP4uJWF1ddaR5vZeHZyZXtesZae4tbnxZuW84h/jRmrXD5boi4zk90sxJNKuu7yN1\nBbAtAsJ6hBLZqzXToR7+9PKHCBC9YQbeGTe2oxnUJF2g11JXVHnTJZFHvH+bdESG\n29cHXcTxPBmFr9aXifhtKZ/eUqqSA/pADtS/byHrJyacCtAvjC3qTP0nYgKuxmqD\Opt7SD8f53vz0oM/6MTpSST3kKiZucfmdPm45h2QfmsEW1unC0VX1H8KE41JV5rg\nwaEDxrqEBXPrvHnh1VDMm60Z6f+UCgnkTb2SAMDJgQKBgQDkcFLtSE4G6bO7s+op\nSIJT7s5GzAASkxAGFspYTdBMGoo/GcwkOJDK0oxhvbVdOIyr7InLuTom2StJ1txc\nyv2sLDU7//wuwP62T0YUeMwua8KsHVKZutTUARItfkXn6C4lhy4WaI3cPKUacHwC\nIjBX9LeXaxIcUVLc14tONVFhUQKBgQDKWYYcXva3P+lbf02yxzHlbO+rEPxUyriD\nwawXTIgVhVNT6dBUbCkQGOlK2dbt9kFlIVsXzHf/yAEQ2qRY1IK0xXZQYBmc3p/g\n7eOPq3lGoneKLwm+IFdIoPhr/3Nghm5yl7WTvMRM0VO/l8KftA1IyK7nwwWjobkl\nSu1McSKuFwKBgQCNdwXTzcgMPePBJLypDi8vXR6+9wxAdHQi4TAzmRSaXIEqbIZg\nE+uOvu6ShNHwxdlPiq8Wy0E415oYIwfaKxcG7WWWH4ODTJ8wNU131grT4IXw4kPJ\n0cqE85jXNXCDGeSh9uHSnLLlJWU1R110UMnRXknnajYP9Ui0XIL3Tstz0QKBgEIZ\nPFXIL49ssS3SR+8+Ym4vR5r50XNhRSTE/xIdTda51p5yojrxmfhIKuzoe+z/pB0E\n6Fy9zfUfwDlhMo5R3OBwIFXhDnzPvCodi1hDCzqnl6Tr+KLCrcBr1Lpyl53QTAPi\ns2XvAfb2R+c01aX2j8MTxYl/pGVIoWsFBgEXO/BAoGAJuN0vK2h2oyPOaiGnP82\n2pbM7DX9Rs8a9H5+t04AR4LYq118VqY6LQXBr7PTjydE+KvS7r5ej6YPsr78x6DK\nKLyfgVEtLGTZXWzD8Wmh89dC1CAFFyuSLjEP+jNmW8gIIrB/nHpyIYeeGIWR6hch\nbp/NsOL8/hWydjAE6vJgBlk=\n-----END PRIVATE KEY-----\n";
-
-let firebaseApp;
-if (!admin.apps.length) {
-    try {
-        firebaseApp = admin.initializeApp({
-            credential: admin.credential.cert({
-                projectId: "mysticmate-chess-hub",
-                clientEmail: "firebase-adminsdk-fbsvc@mysticmate-chess-hub.iam.gserviceaccount.com",
-                privateKey: rawKey.replace(/\\n/g, '\n')
-            }),
-            databaseURL: "https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app"
-        });
-        console.log("🔥 Firebase linked successfully!");
-    } catch (err) {
-        console.error("Firebase initialization failed:", err.message);
-    }
-} else {
-    firebaseApp = admin.apps[0];
-}
-
-const db = firebaseApp ? firebaseApp.database() : null;
 
 // Create Order Route
 app.post('/create-order', async (req, res) => {
@@ -87,11 +62,9 @@ app.post('/create-order', async (req, res) => {
     }
 });
 
-// Webhook Route
+// Webhook Route using ultra-fast Firebase REST API (No Keys Required)
 app.post('/cashfree-webhook', async (req, res) => {
     try {
-        if (!db) return res.status(500).send("Database not connected");
-
         const signature = req.headers['x-webhook-signature'];
         const timestamp = req.headers['x-webhook-timestamp'];
         if (!signature || !timestamp) return res.status(200).send("OK");
@@ -105,18 +78,37 @@ app.post('/cashfree-webhook', async (req, res) => {
         const payload = req.body;
         if (payload.event === "ORDER_PAID" || (payload.data && payload.data.order && payload.data.order.order_status === "PAID")) {
             const orderId = payload.data.order.order_id; 
-            const tourRef = db.ref("registrations");
-            const passRef = db.ref("puzzle_pass_registrations");
 
-            const tourSnap = await tourRef.once("value");
-            tourSnap.forEach((child) => {
-                if (child.val().paymentId === orderId) child.ref.update({ status: "Approved" });
-            });
+            // 🚀 Fetching data via open REST endpoint
+            const dbBaseUrl = "https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app";
+            
+            // 1. Update Tournaments Registrations
+            const tourRes = await fetch(`${dbBaseUrl}/registrations.json`);
+            const tourData = await tourRes.json();
+            if (tourData) {
+                for (let key in tourData) {
+                    if (tourData[key].paymentId === orderId) {
+                        await fetch(`${dbBaseUrl}/registrations/${key}/status.json`, {
+                            method: "PUT",
+                            body: JSON.stringify("Approved")
+                        });
+                    }
+                }
+            }
 
-            const passSnap = await passRef.once("value");
-            passSnap.forEach((child) => {
-                if (child.val().paymentId === orderId) child.ref.update({ status: "Approved" });
-            });
+            // 2. Update Puzzle Pass Registrations
+            const passRes = await fetch(`${dbBaseUrl}/puzzle_pass_registrations.json`);
+            const passData = await passRes.json();
+            if (passData) {
+                for (let key in passData) {
+                    if (passData[key].paymentId === orderId) {
+                        await fetch(`${dbBaseUrl}/puzzle_pass_registrations/${key}/status.json`, {
+                            method: "PUT",
+                            body: JSON.stringify("Approved")
+                        });
+                    }
+                }
+            }
         }
         return res.status(200).send("OK");
     } catch (error) {
@@ -126,7 +118,7 @@ app.post('/cashfree-webhook', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Continuous Server process online at port ${PORT}`);
+    console.log(`🚀 Continuous REST Server process online at port ${PORT}`);
 });
 
 module.exports = app;
