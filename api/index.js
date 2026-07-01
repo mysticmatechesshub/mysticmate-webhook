@@ -10,23 +10,23 @@ const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498";
 const dbSecret = "SMn3KGEniy6MJonxSlonhyJ6qjj8m8s8EbuZHnD2"; 
 const dbBaseUrl = `https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app`;
 
-// Naya Automated Affiliate Engine
-async function processMysticAffiliateCommission(name, whatsapp, referralCode, amount, orderId, tournamentTitle) {
+// Redesigned Pure Autopilot Affiliate Calculation Matrix
+async function runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, amount, orderId, tournamentTitle) {
     try {
-        const pRes = await fetch(`${dbBaseUrl}/mystic_players/${whatsapp}.json?auth=${dbSecret}`);
+        const pRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
         const player = await pRes.json();
         if (!player) return;
 
         const actualRefCode = player.referrerCode || referralCode || "";
         if (!actualRefCode) return;
 
-        const affRes = await fetch(`${dbBaseUrl}/mystic_affiliates.json?auth=${dbSecret}`);
-        const affiliates = await affRes.json() || {};
+        const affRes = await fetch(`${dbBaseUrl}/affiliateUsers.json?auth=${dbSecret}`);
+        const affiliateUsers = await affRes.json() || {};
 
         let affKey = null; let affData = null;
-        for (const key in affiliates) {
-            if (affiliates[key].code?.toUpperCase() === actualRefCode.toUpperCase()) {
-                affKey = key; affData = affiliates[key]; break;
+        for (const key in affiliateUsers) {
+            if (affiliateUsers[key].code?.toUpperCase() === actualRefCode.toUpperCase()) {
+                affKey = key; affData = affiliateUsers[key]; break;
             }
         }
         if (!affKey) return;
@@ -35,19 +35,20 @@ async function processMysticAffiliateCommission(name, whatsapp, referralCode, am
         let rate = isFirst ? 0.20 : 0.10;
         const commission = Math.round(Number(amount) * rate);
 
-        // 1. Transaction Log
-        await fetch(`${dbBaseUrl}/mystic_wallet_txs/tx_${orderId}.json?auth=${dbSecret}`, {
+        // A. Generate Unique Node entry under walletTransactions node
+        await fetch(`${dbBaseUrl}/walletTransactions/tx_${orderId}.json?auth=${dbSecret}`, {
             method: "PUT",
             body: JSON.stringify({
-                affiliateCode: affData.code, mobile: affKey, playerName: name, playerMobile: whatsapp,
-                tournament: tournamentTitle, amount: Number(amount), commission, type: "Credit",
-                source: isFirst ? "First Tournament" : "Tournament Rejoin", status: "Approved",
-                date: new Date().toLocaleString("en-GB"), createdAt: Date.now()
+                affiliateCode: affData.code, affiliateMobile: affKey, mobile: affKey,
+                playerName: name, playerMobile: whatsapp, tournament: tournamentTitle, registrationId: orderId,
+                amount: Number(amount), commission, commissionPercent: rate * 100,
+                type: "Credit", source: isFirst ? "First Tournament" : "Tournament Rejoin",
+                status: "Approved", date: new Date().toLocaleString("en-GB"), createdAt: Date.now()
             })
         });
 
-        // 2. Update Affiliate Balance
-        await fetch(`${dbBaseUrl}/mystic_affiliates/${affKey}.json?auth=${dbSecret}`, {
+        // B. Dynamic Balance increments onto parent profiles
+        await fetch(`${dbBaseUrl}/affiliateUsers/${affKey}.json?auth=${dbSecret}`, {
             method: "PATCH",
             body: JSON.stringify({
                 pendingAmount: Number(affData.pendingAmount || 0) + commission,
@@ -56,19 +57,19 @@ async function processMysticAffiliateCommission(name, whatsapp, referralCode, am
             })
         });
 
-        // 3. Update Player Flag
-        await fetch(`${dbBaseUrl}/mystic_players/${whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, { 
+        // C. Complete lifecycle validation flag check
+        await fetch(`${dbBaseUrl}/players/${whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, { 
             method: "PUT", body: JSON.stringify(true) 
         });
         
-    } catch (e) { console.error("Redesigned Affiliate Engine Error: ", e.message); }
+    } catch (e) { console.error("Affiliate engine failure: ", e.message); }
 }
 
-// Full Automatic Status Check & Database Sync Endpoint
+// Full Fast Checker Gateway Endpoint Tracker
 app.get('/check-status', async (req, res) => {
     try {
         const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink } = req.query;
-        if (!order_id) return res.status(400).json({ error: "Missing parameters" });
+        if (!order_id) return res.status(400).json({ error: "Missing tracking keys" });
 
         const response = await fetch(`https://api.cashfree.com/pg/orders/${order_id}`, {
             method: "GET",
@@ -77,31 +78,32 @@ app.get('/check-status', async (req, res) => {
         const orderDetails = await response.json();
 
         if (orderDetails.order_status === "PAID") {
-            const targetNode = nodeType === "PuzzlePass" ? "mystic_puzzle_pass_registrations" : "mystic_registrations";
+            const targetNode = nodeType === "PuzzlePass" ? "puzzle_pass_registrations" : "registrations";
             
             const dupRes = await fetch(`${dbBaseUrl}/${targetNode}/${order_id}.json?auth=${dbSecret}`);
             const dupData = await dupRes.json();
 
+            // Fire write engine blocks only if unique order node slots are clean empty
             if (!dupData) {
-                const regData = {
+                const registrationData = {
                     date: new Date().toLocaleString("en-GB"), name, whatsapp, lichess, rating, state,
                     tournament: tournamentTitle, passName: tournamentTitle, amount: orderDetails.order_amount,
                     paymentId: order_id, status: "Approved", referralCode: referralCode || "",
                     commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || ""
                 };
 
-                // Direct Set (PUT) Registration
+                // Secure PUT mapping bypass
                 await fetch(`${dbBaseUrl}/${targetNode}/${order_id}.json?auth=${dbSecret}`, {
                     method: "PUT",
-                    body: JSON.stringify(regData)
+                    body: JSON.stringify(registrationData)
                 });
 
-                // Update Player Profile
-                const playerRes = await fetch(`${dbBaseUrl}/mystic_players/${whatsapp}.json?auth=${dbSecret}`);
+                // Profile initialization sync tag checks
+                const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
                 const playerExists = await playerRes.json();
                 
                 if (!playerExists) {
-                    await fetch(`${dbBaseUrl}/mystic_players/${whatsapp}.json?auth=${dbSecret}`, {
+                    await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
                         method: "PUT",
                         body: JSON.stringify({
                             name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB"),
@@ -110,9 +112,9 @@ app.get('/check-status', async (req, res) => {
                     });
                 }
 
-                // Run affiliate calculation if match entry
+                // Fire payout splits strictly if normal tour is evaluated
                 if (nodeType !== "PuzzlePass") {
-                    await processMysticAffiliateCommission(name, whatsapp, referralCode, orderDetails.order_amount, order_id, tournamentTitle);
+                    await runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, order_id, tournamentTitle);
                 }
             }
         }
@@ -142,5 +144,5 @@ app.post('/create-order', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Redesigned Master API Online`));
+app.listen(PORT, () => console.log(`🚀 Redesigned Master Autopilot Engine Active`));
 module.exports = app;
