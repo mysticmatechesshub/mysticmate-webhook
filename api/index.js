@@ -10,8 +10,8 @@ const secretKey = "cfsk_ma_prod_27ee4f24f381107f920156dc5ef18507_0990c498";
 const dbSecret = "SMn3KGEniy6MJonxSlonhyJ6qjj8m8s8EbuZHnD2"; 
 const dbBaseUrl = `https://mysticmate-chess-hub-default-rtdb.asia-southeast1.firebasedatabase.app`;
 
-// Redesigned Pure Autopilot Affiliate Calculation Matrix
-async function runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, amount, orderId, tournamentTitle) {
+// 🔥 REST API ENGINE FOR ORIGINAL AFFILIATE WALLETS STRUCTURE
+async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, orderId, tournamentTitle) {
     try {
         const pRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
         const player = await pRes.json();
@@ -35,7 +35,7 @@ async function runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, amou
         let rate = isFirst ? 0.20 : 0.10;
         const commission = Math.round(Number(amount) * rate);
 
-        // A. Generate Unique Node entry under walletTransactions node
+        // 1. Save directly inside original walletTransactions node layout
         await fetch(`${dbBaseUrl}/walletTransactions/tx_${orderId}.json?auth=${dbSecret}`, {
             method: "PUT",
             body: JSON.stringify({
@@ -47,7 +47,7 @@ async function runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, amou
             })
         });
 
-        // B. Dynamic Balance increments onto parent profiles
+        // 2. Direct overwrite balancing metrics inside original affiliateUsers node layout
         await fetch(`${dbBaseUrl}/affiliateUsers/${affKey}.json?auth=${dbSecret}`, {
             method: "PATCH",
             body: JSON.stringify({
@@ -57,19 +57,19 @@ async function runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, amou
             })
         });
 
-        // C. Complete lifecycle validation flag check
+        // 3. Complete structural validation flag recharge
         await fetch(`${dbBaseUrl}/players/${whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, { 
             method: "PUT", body: JSON.stringify(true) 
         });
         
-    } catch (e) { console.error("Affiliate engine failure: ", e.message); }
+    } catch (e) { console.error("Affiliate processing error: ", e.message); }
 }
 
-// Full Fast Checker Gateway Endpoint Tracker
+// Full Standalone Auto Approve Checker Endpoint
 app.get('/check-status', async (req, res) => {
     try {
         const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink } = req.query;
-        if (!order_id) return res.status(400).json({ error: "Missing tracking keys" });
+        if (!order_id) return res.status(400).json({ error: "Missing parameter strings" });
 
         const response = await fetch(`https://api.cashfree.com/pg/orders/${order_id}`, {
             method: "GET",
@@ -78,12 +78,12 @@ app.get('/check-status', async (req, res) => {
         const orderDetails = await response.json();
 
         if (orderDetails.order_status === "PAID") {
+            // 🔥 REST RESTORED TO ORIGINAL BACKUP NODES PATH STRINGS EXACTLY
             const targetNode = nodeType === "PuzzlePass" ? "puzzle_pass_registrations" : "registrations";
             
             const dupRes = await fetch(`${dbBaseUrl}/${targetNode}/${order_id}.json?auth=${dbSecret}`);
             const dupData = await dupRes.json();
 
-            // Fire write engine blocks only if unique order node slots are clean empty
             if (!dupData) {
                 const registrationData = {
                     date: new Date().toLocaleString("en-GB"), name, whatsapp, lichess, rating, state,
@@ -92,13 +92,13 @@ app.get('/check-status', async (req, res) => {
                     commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || ""
                 };
 
-                // Secure PUT mapping bypass
+                // Direct PUT setup via Secret Master Bypass Token
                 await fetch(`${dbBaseUrl}/${targetNode}/${order_id}.json?auth=${dbSecret}`, {
                     method: "PUT",
                     body: JSON.stringify(registrationData)
                 });
 
-                // Profile initialization sync tag checks
+                // Update Master players structure node mapping exactly matching backup arrays
                 const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
                 const playerExists = await playerRes.json();
                 
@@ -112,9 +112,9 @@ app.get('/check-status', async (req, res) => {
                     });
                 }
 
-                // Fire payout splits strictly if normal tour is evaluated
+                // Fire payout calculations strictly for real tournament entries
                 if (nodeType !== "PuzzlePass") {
-                    await runNewAutopilotAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, order_id, tournamentTitle);
+                    await runOriginalAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, order_id, tournamentTitle);
                 }
             }
         }
@@ -144,5 +144,5 @@ app.post('/create-order', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Redesigned Master Autopilot Engine Active`));
+app.listen(PORT, () => console.log(`🚀 Original Paths API Matrix Online`));
 module.exports = app;
