@@ -77,16 +77,19 @@ app.get('/check-status', async (req, res) => {
         const orderDetails = await response.json();
 
         if (orderDetails.order_status === "PAID") {
-            // 🔥 FIXED: Dono data ab hamesha central "registrations" node me hi jayenge
             const targetNode = "registrations";
             
-            // Duplicate write checking loop inside central registrations
+            // Backend strict evaluation routine
             const dupCheckRes = await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`);
             const dupCheckData = await dupCheckRes.json() || {};
-            let isAlreadySaved = Object.values(dupCheckData).some(v => v.paymentId === order_id);
+            
+            // 🔥 BACKEND COMPLIANT CHECK: Only blocks if it matches BOTH the same mobile AND same tournament layout
+            let isAlreadySaved = Object.values(dupCheckData).some(v => 
+                v.paymentId === order_id || 
+                (v.whatsapp === whatsapp && v.tournament === tournamentTitle && v.status !== "Rejected" && v.status !== "Refunded")
+            );
 
             if (!isAlreadySaved) {
-                // Exact India Timestamp Creation
                 const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
 
                 const registrationData = {
@@ -94,16 +97,14 @@ app.get('/check-status', async (req, res) => {
                     tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
                     paymentId: order_id, status: "Approved", referralCode: referralCode || "",
                     commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
-                    eventType: nodeType // Tournament ya PuzzlePass pehchanne ke liye filter tag
+                    eventType: nodeType 
                 };
 
-                // Push inside unified registrations node
                 await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
                     method: "POST",
                     body: JSON.stringify(registrationData)
                 });
 
-                // 🔥 FIXED: Hamesha player profiles check aur update hogi, bhale hi wo Pass ho ya Tournament
                 const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
                 const playerExists = await playerRes.json();
                 
