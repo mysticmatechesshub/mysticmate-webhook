@@ -77,9 +77,10 @@ app.get('/check-status', async (req, res) => {
         const orderDetails = await response.json();
 
         if (orderDetails.order_status === "PAID") {
-            const targetNode = nodeType === "PuzzlePass" ? "puzzle_pass_registrations" : "registrations";
+            // 🔥 FIXED: Dono data ab hamesha central "registrations" node me hi jayenge
+            const targetNode = "registrations";
             
-            // Duplicate write checking loop
+            // Duplicate write checking loop inside central registrations
             const dupCheckRes = await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`);
             const dupCheckData = await dupCheckRes.json() || {};
             let isAlreadySaved = Object.values(dupCheckData).some(v => v.paymentId === order_id);
@@ -92,16 +93,17 @@ app.get('/check-status', async (req, res) => {
                     date: currentIndiaDate, name, whatsapp, lichess, rating, state,
                     tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
                     paymentId: order_id, status: "Approved", referralCode: referralCode || "",
-                    commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false
+                    commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
+                    eventType: nodeType // Tournament ya PuzzlePass pehchanne ke liye filter tag
                 };
 
-                // Use POST (Push method) to match your original database alpha-numeric keys layout
+                // Push inside unified registrations node
                 await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
                     method: "POST",
                     body: JSON.stringify(registrationData)
                 });
 
-                // Update players profiles node structure
+                // 🔥 FIXED: Hamesha player profiles check aur update hogi, bhale hi wo Pass ho ya Tournament
                 const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
                 const playerExists = await playerRes.json();
                 
