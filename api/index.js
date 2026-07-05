@@ -75,7 +75,7 @@ async function getRealBankUtrFromCashfree(orderId) {
         const paymentsArray = await response.json();
 
         if (paymentsArray && Array.isArray(paymentsArray) && paymentsArray.length > 0) {
-            // Sirf SUCCESS ya SUCCESSFUL transaction uthao
+            // Sirf SUCCESS transaction uthao
             const successPayment = paymentsArray.find(p => p.payment_status === "SUCCESS");
             if (successPayment) {
                 if (successPayment.bank_reference) return successPayment.bank_reference;
@@ -90,7 +90,7 @@ async function getRealBankUtrFromCashfree(orderId) {
     return null;
 }
 
-// 🎯 ENDPOINT: PURANE SAARE RECORDS KO DEEP SEARCH KARKE UPDATE KARNA
+// 🎯 ENDPOINT: PURANE SAARE RECORDS KO DEEP SEARCH KARKE BACKUP KESATH UPDATE KARNA
 app.get('/sync-old-utr', async (req, res) => {
     try {
         const regRes = await fetch(`${dbBaseUrl}/registrations.json?auth=${dbSecret}`);
@@ -115,9 +115,13 @@ app.get('/sync-old-utr', async (req, res) => {
             const real12DigitUtr = await getRealBankUtrFromCashfree(rawCheckId);
 
             if (real12DigitUtr) {
+                // 🔥 BACKUP INJECTION FIXED: paymentId overwrite karne se pehle original Order ID ko gatewayOrderId me lock kar rahe hain
                 await fetch(`${dbBaseUrl}/registrations/${key}.json?auth=${dbSecret}`, {
                     method: "PATCH",
-                    body: JSON.stringify({ paymentId: real12DigitUtr })
+                    body: JSON.stringify({ 
+                        paymentId: real12DigitUtr,
+                        gatewayOrderId: rawCheckId 
+                    })
                 });
                 updateCount++;
             }
@@ -125,7 +129,7 @@ app.get('/sync-old-utr', async (req, res) => {
 
         return res.json({ 
             success: true, 
-            message: `Sync process finished! Deep-scanned Cashfree Gateway. Overwrote ${updateCount} records with real 12-digit Bank UTR strings. Bypassed ${bypassCount} already formatted rows.`
+            message: `Sync process finished! Overwrote ${updateCount} records with real 12-digit Bank UTRs and saved original Order IDs. Bypassed ${bypassCount} rows.`
         });
 
     } catch (error) {
@@ -133,7 +137,7 @@ app.get('/sync-old-utr', async (req, res) => {
     }
 });
 
-// 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY (FOR NEW REGISTERING USERS)
+// 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY (FOR LIVE & NEW REGISTERING USERS)
 app.get('/check-status', async (req, res) => {
     try {
         const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink, amount } = req.query;
@@ -145,7 +149,7 @@ app.get('/check-status', async (req, res) => {
         });
         const orderDetails = await response.json();
 
-        // Naye users ke liye bhi deep payments API se live UTR nikalenge
+        // Deep payments API se live UTR nikalenge
         let cashfreeBankUtr = await getRealBankUtrFromCashfree(order_id) || order_id;
 
         if (orderDetails.order_status === "PAID") {
@@ -168,6 +172,7 @@ app.get('/check-status', async (req, res) => {
                 date: currentIndiaDate, name, whatsapp, lichess, rating, state,
                 tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
                 paymentId: cashfreeBankUtr, 
+                gatewayOrderId: order_id, // Live payments ke liye bhi original Order ID secure backup ho jayegi
                 status: "Approved", referralCode: referralCode || "",
                 commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
                 eventType: nodeType 
@@ -179,7 +184,7 @@ app.get('/check-status', async (req, res) => {
                     body: JSON.stringify(registrationData)
                 });
             } else if (!isAlreadySaved) {
-                await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
+                await fetch(`${dbBaseUrl}/registrations.json?auth=${dbSecret}`, {
                     method: "POST",
                     body: JSON.stringify(registrationData)
                 });
