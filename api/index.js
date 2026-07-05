@@ -65,30 +65,32 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
     } catch (e) { console.error("Affiliate engine failure: ", e.message); }
 }
 
-// Helper function to extract 12-digit Bank UTR using all possible Cashfree API locations
-function extractBankUtr(orderDetails) {
+// 🔥 DEEP SEARCH ENGINE: Cashfree ki payments sub-API se 12-digit Bank UTR nikalne ke liye
+async function getRealBankUtrFromCashfree(orderId) {
     try {
-        // Method A: Check nested payment gateway details
-        if (orderDetails.payment_gateway_details && orderDetails.payment_gateway_details.bank_reference) {
-            return orderDetails.payment_gateway_details.bank_reference;
-        }
-        // Method B: Check flat bank_reference fallback root level
-        if (orderDetails.bank_reference) {
-            return orderDetails.bank_reference;
-        }
-        // Method C: Scan transaction object inside order arrays if present
-        if (orderDetails.payments && orderDetails.payments.length > 0) {
-            const lastPayment = orderDetails.payments[0];
-            if (lastPayment.bank_reference) return lastPayment.bank_reference;
-            if (lastPayment.payment_gateway_details && lastPayment.payment_gateway_details.bank_reference) {
-                return lastPayment.payment_gateway_details.bank_reference;
+        const response = await fetch(`https://api.cashfree.com/pg/orders/${orderId}/payments`, {
+            method: "GET",
+            headers: { "x-client-id": clientID, "x-client-secret": secretKey, "x-api-version": "2023-08-01", "Content-Type": "application/json" }
+        });
+        const paymentsArray = await response.json();
+
+        if (paymentsArray && Array.isArray(paymentsArray) && paymentsArray.length > 0) {
+            // Sirf SUCCESS ya SUCCESSFUL transaction uthao
+            const successPayment = paymentsArray.find(p => p.payment_status === "SUCCESS");
+            if (successPayment) {
+                if (successPayment.bank_reference) return successPayment.bank_reference;
+                if (successPayment.payment_gateway_details && successPayment.payment_gateway_details.bank_reference) {
+                    return successPayment.payment_gateway_details.bank_reference;
+                }
             }
         }
-    } catch (e) { console.log("UTR extraction skip evaluation logic error: ", e.message); }
-    return null; // Return null if 12-digit reference is completely empty/unprocessed yet
+    } catch (e) {
+        console.log("Error inside deep UTR extraction:", e.message);
+    }
+    return null;
 }
 
-// 🎯 ENDPOINT: FIXING AND SYNCING ALL HISTORICAL NODES TO GRAB 12-DIGIT UTR
+// 🎯 ENDPOINT: PURANE SAARE RECORDS KO DEEP SEARCH KARKE UPDATE KARNA
 app.get('/sync-old-utr', async (req, res) => {
     try {
         const regRes = await fetch(`${dbBaseUrl}/registrations.json?auth=${dbSecret}`);
@@ -101,42 +103,29 @@ app.get('/sync-old-utr', async (req, res) => {
 
         for (const key in registrations) {
             const entry = registrations[key];
-            
-            // Extract raw checkout identifier target fields
             let rawCheckId = entry.paymentId || "";
 
-            // If it's already a 12-digit numeric pure bank ref string, skip it
+            // Agar pehle se hi 12-digit ka proper pure numeric UTR hai toh touch mat karo
             if (rawCheckId.length === 12 && !isNaN(rawCheckId)) {
                 bypassCount++;
                 continue;
             }
 
-            // Fallback: If it's missing or an older style layout reference target, we process it
-            try {
-                const cfRes = await fetch(`https://api.cashfree.com/pg/orders/${rawCheckId}`, {
-                    method: "GET",
-                    headers: { "x-client-id": clientID, "x-client-secret": secretKey, "x-api-version": "2023-08-01", "Content-Type": "application/json" }
+            // Cashfree Payments Sub-API se real UTR fetch karo
+            const real12DigitUtr = await getRealBankUtrFromCashfree(rawCheckId);
+
+            if (real12DigitUtr) {
+                await fetch(`${dbBaseUrl}/registrations/${key}.json?auth=${dbSecret}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ paymentId: real12DigitUtr })
                 });
-                const orderDetails = await cfRes.json();
-
-                // Call rigorous multi-level deep extractor loop
-                const structuralUtr = extractBankUtr(orderDetails);
-
-                if (structuralUtr) {
-                    await fetch(`${dbBaseUrl}/registrations/${key}.json?auth=${dbSecret}`, {
-                        method: "PATCH",
-                        body: JSON.stringify({ paymentId: structuralUtr })
-                    });
-                    updateCount++;
-                }
-            } catch (err) {
-                console.error(`Sync iteration block break error on payload target reference node ${rawCheckId}:`, err.message);
+                updateCount++;
             }
         }
 
         return res.json({ 
             success: true, 
-            message: `Sync process finished! Scanned database, bypassed ${bypassCount} standard configurations and overwrote ${updateCount} targets with real 12-digit UTR strings.`
+            message: `Sync process finished! Deep-scanned Cashfree Gateway. Overwrote ${updateCount} records with real 12-digit Bank UTR strings. Bypassed ${bypassCount} already formatted rows.`
         });
 
     } catch (error) {
@@ -144,7 +133,7 @@ app.get('/sync-old-utr', async (req, res) => {
     }
 });
 
-// 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY
+// 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY (FOR NEW REGISTERING USERS)
 app.get('/check-status', async (req, res) => {
     try {
         const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink, amount } = req.query;
@@ -156,8 +145,8 @@ app.get('/check-status', async (req, res) => {
         });
         const orderDetails = await response.json();
 
-        // Strict validation check sequence
-        let cashfreeBankUtr = extractBankUtr(orderDetails) || order_id;
+        // Naye users ke liye bhi deep payments API se live UTR nikalenge
+        let cashfreeBankUtr = await getRealBankUtrFromCashfree(order_id) || order_id;
 
         if (orderDetails.order_status === "PAID") {
             const targetNode = "registrations";
