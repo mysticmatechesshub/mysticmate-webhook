@@ -40,6 +40,7 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
         // 1. Push transaction log inside walletTransactions
         await fetch(`${dbBaseUrl}/walletTransactions.json?auth=${dbSecret}`, {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 affiliateCode: affData.code, affiliateMobile: affKey, mobile: affKey,
                 playerName: name, playerMobile: whatsapp, tournament: tournamentTitle, registrationId: orderId,
@@ -52,10 +53,11 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
         // 2. Patch real balance inside affiliateUsers
         await fetch(`${dbBaseUrl}/affiliateUsers/${affKey}.json?auth=${dbSecret}`, {
             method: "PATCH",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 pendingAmount: Number(affData.pendingAmount || 0) + commission,
-                totalEarned: Number(affData.totalEarned || 0) + commission,
-                totalReferrals: Number(affData.totalReferrals || 0) + (isFirst ? 1 : 0)
+                totalEarned: Number(affiliateData.totalEarned || 0) + commission,
+                totalReferrals: Number(affiliateData.totalReferrals || 0) + (isFirst ? 1 : 0)
             })
         });
 
@@ -76,6 +78,12 @@ app.get('/check-status', async (req, res) => {
         });
         const orderDetails = await response.json();
 
+        // 🔍 EXTRACTING CASHFREE GENERATED 12-DIGIT BANK UTR NUMBER
+        let cashfreeBankUtr = order_id; // Default fallback to order_id if not present
+        if (orderDetails.payment_gateway_details && orderDetails.payment_gateway_details.bank_reference) {
+            cashfreeBankUtr = orderDetails.payment_gateway_details.bank_reference;
+        }
+
         if (orderDetails.order_status === "PAID") {
             const targetNode = "registrations";
             
@@ -83,47 +91,72 @@ app.get('/check-status', async (req, res) => {
             const dupCheckRes = await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`);
             const dupCheckData = await dupCheckRes.json() || {};
             
-            // 🔥 BACKEND COMPLIANT CHECK: Only blocks if it matches BOTH the same mobile AND same tournament layout
+            // 🔥 BACKEND COMPLIANT CHECK
             let isAlreadySaved = Object.values(dupCheckData).some(v => 
                 v.paymentId === order_id || 
+                v.paymentId === cashfreeBankUtr ||
                 (v.whatsapp === whatsapp && v.tournament === tournamentTitle && v.status !== "Rejected" && v.status !== "Refunded")
             );
 
-            if (!isAlreadySaved) {
-                const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
+            // Find key if there is a pending state matching this order layout to update it
+            let pendingNodeKey = Object.keys(dupCheckData).find(k => k === order_id);
 
-                const registrationData = {
-                    date: currentIndiaDate, name, whatsapp, lichess, rating, state,
-                    tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
-                    paymentId: order_id, status: "Approved", referralCode: referralCode || "",
-                    commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
-                    eventType: nodeType 
-                };
+            const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
 
+            const registrationData = {
+                date: currentIndiaDate, name, whatsapp, lichess, rating, state,
+                tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
+                paymentId: cashfreeBankUtr, // Overwriting database node with 12-digit bank UTR
+                status: "Approved", referralCode: referralCode || "",
+                commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
+                eventType: nodeType 
+            };
+
+            if (pendingNodeKey) {
+                // If temporary register injection is found, overwrite the node and convert tracking ID into 12-digit UTR
+                await fetch(`${dbBaseUrl}/${targetNode}/${pendingNodeKey}.json?auth=${dbSecret}`, {
+                    method: "PUT",
+                    body: JSON.stringify(registrationData)
+                });
+            } else if (!isAlreadySaved) {
+                // Fallback creation block if no pre-modal entry layout was found
                 await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
                     method: "POST",
                     body: JSON.stringify(registrationData)
                 });
+            }
 
-                const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
-                const playerExists = await playerRes.json();
-                
-                if (!playerExists) {
-                    await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
-                        method: "PUT",
-                        body: JSON.stringify({
-                            name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }),
-                            banned: false, referrerCode: referralCode || "", affiliateAssigned: !!referralCode, firstTournamentCommissionPaid: false
-                        })
-                    });
-                }
+            // Sync master records framework
+            const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
+            const playerExists = await playerRes.json();
+            
+            if (!playerExists) {
+                await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
+                    method: "PUT",
+                    body: JSON.stringify({
+                        name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }),
+                        banned: false, referrerCode: referralCode || "", affiliateAssigned: !!referralCode, firstTournamentCommissionPaid: false
+                    })
+                });
+            } else {
+                // Update checkout order tracking log map inside system
+                await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ order_id: cashfreeBankUtr })
+                });
+            }
 
-                if (nodeType !== "PuzzlePass") {
-                    await runOriginalAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, order_id, tournamentTitle);
-                }
+            if (nodeType !== "PuzzlePass") {
+                await runOriginalAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, cashfreeBankUtr, tournamentTitle);
             }
         }
-        return res.status(200).json({ status: orderDetails.order_status || "PENDING" });
+        
+        // Return 12-digit UTR directly in response stream for admin script matching interfaces
+        return res.status(200).json({ 
+            status: orderDetails.order_status || "PENDING", 
+            utr: cashfreeBankUtr,
+            bank_reference: cashfreeBankUtr
+        });
     } catch (error) { return res.status(500).json({ error: error.message }); }
 });
 
