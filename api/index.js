@@ -56,8 +56,8 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 pendingAmount: Number(affData.pendingAmount || 0) + commission,
-                totalEarned: Number(affiliateData.totalEarned || 0) + commission,
-                totalReferrals: Number(affiliateData.totalReferrals || 0) + (isFirst ? 1 : 0)
+                totalEarned: Number(affData.totalEarned || 0) + commission,
+                totalReferrals: Number(affData.totalReferrals || 0) + (isFirst ? 1 : 0)
             })
         });
 
@@ -65,6 +65,62 @@ async function runOriginalAffiliateEngine(name, whatsapp, referralCode, amount, 
         await fetch(`${dbBaseUrl}/players/${whatsapp}/firstTournamentCommissionPaid.json?auth=${dbSecret}`, { method: "PUT", body: JSON.stringify(true) });
     } catch (e) { console.error("Affiliate engine failure: ", e.message); }
 }
+
+// 🎯 EXTRA NEW ENDPOINT: PURANE DATA SE 12-DIGIT ASLI UTR NIKALNE KE LIYE
+app.get('/sync-old-utr', async (req, res) => {
+    try {
+        // 1. Database se saare registrations uthao
+        const regRes = await fetch(`${dbBaseUrl}/registrations.json?auth=${dbSecret}`);
+        const registrations = await regRes.json();
+        
+        if (!registrations) return res.json({ message: "No registrations found" });
+        
+        let updateCount = 0;
+        let failedCount = 0;
+
+        // 2. Loop chalao har ek entry par
+        for (const key in registrations) {
+            const entry = registrations[key];
+            
+            // Agar payment ID pehle se 12-digit ka asli digit lag raha ho ya Order ID na ho toh skip karo
+            if (!entry.paymentId || !entry.paymentId.startsWith("order_")) continue;
+
+            try {
+                // 3. Cashfree API se is purani Order ID ka data dhoondho
+                const cfRes = await fetch(`https://api.cashfree.com/pg/orders/${entry.paymentId}`, {
+                    method: "GET",
+                    headers: { "x-client-id": clientID, "x-client-secret": secretKey, "x-api-version": "2023-08-01", "Content-Type": "application/json" }
+                });
+                const orderDetails = await cfRes.json();
+
+                // 4. Agar Cashfree me asli 12-digit bank reference mil jaye
+                if (orderDetails.payment_gateway_details && orderDetails.payment_gateway_details.bank_reference) {
+                    const real12DigitUtr = orderDetails.payment_gateway_details.bank_reference;
+
+                    // 5. Firebase database me paymentId ko asli UTR se overwrite kar do
+                    await fetch(`${dbBaseUrl}/registrations/${key}.json?auth=${dbSecret}`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ paymentId: real12DigitUtr })
+                    });
+                    
+                    updateCount++;
+                }
+            } catch (err) {
+                failedCount++;
+                console.error(`Error syncing order ${entry.paymentId}:`, err.message);
+            }
+        }
+
+        return res.json({ 
+            success: true, 
+            message: `Sync process complete! Overwrote ${updateCount} old records with 12-digit Bank UTRs.`,
+            failed: failedCount
+        });
+
+    } catch (error) {
+        return res.status(500).json({ error: error.message });
+    }
+});
 
 // 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY
 app.get('/check-status', async (req, res) => {
@@ -78,8 +134,7 @@ app.get('/check-status', async (req, res) => {
         });
         const orderDetails = await response.json();
 
-        // 🔍 EXTRACTING CASHFREE GENERATED 12-DIGIT BANK UTR NUMBER
-        let cashfreeBankUtr = order_id; // Default fallback to order_id if not present
+        let cashfreeBankUtr = order_id; 
         if (orderDetails.payment_gateway_details && orderDetails.payment_gateway_details.bank_reference) {
             cashfreeBankUtr = orderDetails.payment_gateway_details.bank_reference;
         }
@@ -87,18 +142,15 @@ app.get('/check-status', async (req, res) => {
         if (orderDetails.order_status === "PAID") {
             const targetNode = "registrations";
             
-            // Backend strict evaluation routine
             const dupCheckRes = await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`);
             const dupCheckData = await dupCheckRes.json() || {};
             
-            // 🔥 BACKEND COMPLIANT CHECK
             let isAlreadySaved = Object.values(dupCheckData).some(v => 
                 v.paymentId === order_id || 
                 v.paymentId === cashfreeBankUtr ||
                 (v.whatsapp === whatsapp && v.tournament === tournamentTitle && v.status !== "Rejected" && v.status !== "Refunded")
             );
 
-            // Find key if there is a pending state matching this order layout to update it
             let pendingNodeKey = Object.keys(dupCheckData).find(k => k === order_id);
 
             const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
@@ -106,27 +158,24 @@ app.get('/check-status', async (req, res) => {
             const registrationData = {
                 date: currentIndiaDate, name, whatsapp, lichess, rating, state,
                 tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
-                paymentId: cashfreeBankUtr, // Overwriting database node with 12-digit bank UTR
+                paymentId: cashfreeBankUtr, 
                 status: "Approved", referralCode: referralCode || "",
                 commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
                 eventType: nodeType 
             };
 
             if (pendingNodeKey) {
-                // If temporary register injection is found, overwrite the node and convert tracking ID into 12-digit UTR
                 await fetch(`${dbBaseUrl}/${targetNode}/${pendingNodeKey}.json?auth=${dbSecret}`, {
                     method: "PUT",
                     body: JSON.stringify(registrationData)
                 });
             } else if (!isAlreadySaved) {
-                // Fallback creation block if no pre-modal entry layout was found
                 await fetch(`${dbBaseUrl}/${targetNode}.json?auth=${dbSecret}`, {
                     method: "POST",
                     body: JSON.stringify(registrationData)
                 });
             }
 
-            // Sync master records framework
             const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
             const playerExists = await playerRes.json();
             
@@ -139,7 +188,6 @@ app.get('/check-status', async (req, res) => {
                     })
                 });
             } else {
-                // Update checkout order tracking log map inside system
                 await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`, {
                     method: "PATCH",
                     body: JSON.stringify({ order_id: cashfreeBankUtr })
@@ -151,7 +199,6 @@ app.get('/check-status', async (req, res) => {
             }
         }
         
-        // Return 12-digit UTR directly in response stream for admin script matching interfaces
         return res.status(200).json({ 
             status: orderDetails.order_status || "PENDING", 
             utr: cashfreeBankUtr,
