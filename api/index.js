@@ -140,7 +140,8 @@ app.get('/sync-old-utr', async (req, res) => {
 // 🎯 REAL-TIME STATUS CHECK & PUSH WRITER GATEWAY (FOR LIVE & NEW REGISTERING USERS)
 app.get('/check-status', async (req, res) => {
     try {
-        const { order_id, name, whatsapp, lichess, referralCode, rating, state, nodeType, tournamentTitle, tournamentLink, amount } = req.query;
+        // ⭐ EXTRACTED couponCode EXPLICITLY FROM REQUEST QUERY OBJECT
+        const { order_id, name, whatsapp, lichess, referralCode, couponCode, rating, state, nodeType, tournamentTitle, tournamentLink, amount } = req.query;
         if (!order_id) return res.status(400).json({ error: "Missing parameters" });
 
         const response = await fetch(`https://api.cashfree.com/pg/orders/${order_id}`, {
@@ -168,12 +169,18 @@ app.get('/check-status', async (req, res) => {
 
             const currentIndiaDate = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" });
 
+            // Ensure we filter out string representations of "NONE" or "none" safely
+            const cleanReferral = (referralCode && referralCode.toUpperCase() !== "NONE") ? referralCode.trim() : "";
+            const cleanCoupon = (couponCode && couponCode.toUpperCase() !== "NONE") ? couponCode.trim() : "";
+
             const registrationData = {
                 date: currentIndiaDate, name, whatsapp, lichess, rating, state,
                 tournament: tournamentTitle, passName: tournamentTitle, amount: Number(amount || orderDetails.order_amount),
                 paymentId: cashfreeBankUtr, 
                 gatewayOrderId: order_id, // Live payments ke liye bhi original Order ID secure backup ho jayegi
-                status: "Approved", referralCode: referralCode || "",
+                status: "Approved", 
+                referralCode: cleanReferral,
+                couponCode: cleanCoupon, // ✅ FIXED: Explicit payload injection mapping into couponCode column node
                 commissionProcessed: (nodeType !== "PuzzlePass"), tournamentLink: tournamentLink || "", isNewPlayer: false,
                 eventType: nodeType 
             };
@@ -190,6 +197,21 @@ app.get('/check-status', async (req, res) => {
                 });
             }
 
+            // Automatically patch and increment the timesUsed count structure if coupon is captured
+            if (cleanCoupon) {
+                try {
+                    const couponRefRes = await fetch(`${dbBaseUrl}/dynamicCoupons/${cleanCoupon.toUpperCase()}.json?auth=${dbSecret}`);
+                    const couponData = await couponRefRes.json();
+                    if (couponData) {
+                        const newCount = (couponData.timesUsed || 0) + 1;
+                        await fetch(`${dbBaseUrl}/dynamicCoupons/${cleanCoupon.toUpperCase()}.json?auth=${dbSecret}`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ timesUsed: newCount })
+                        });
+                    }
+                } catch (cErr) { console.log("Coupon increment error inside backend logic:", cErr.message); }
+            }
+
             const playerRes = await fetch(`${dbBaseUrl}/players/${whatsapp}.json?auth=${dbSecret}`);
             const playerExists = await playerRes.json();
             
@@ -198,7 +220,7 @@ app.get('/check-status', async (req, res) => {
                     method: "PUT",
                     body: JSON.stringify({
                         name, whatsapp, lichess, rating, state, firstJoined: new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }),
-                        banned: false, referrerCode: referralCode || "", affiliateAssigned: !!referralCode, firstTournamentCommissionPaid: false
+                        banned: false, referrerCode: cleanReferral, affiliateAssigned: !!cleanReferral, firstTournamentCommissionPaid: false
                     })
                 });
             } else {
@@ -209,7 +231,7 @@ app.get('/check-status', async (req, res) => {
             }
 
             if (nodeType !== "PuzzlePass") {
-                await runOriginalAffiliateEngine(name, whatsapp, referralCode, orderDetails.order_amount, cashfreeBankUtr, tournamentTitle);
+                await runOriginalAffiliateEngine(name, whatsapp, cleanReferral, orderDetails.order_amount, cashfreeBankUtr, tournamentTitle);
             }
         }
         
